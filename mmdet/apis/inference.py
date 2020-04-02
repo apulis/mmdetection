@@ -60,6 +60,24 @@ class LoadImage(object):
         return results
 
 
+def inference_batch(model, imgs):
+    cfg = model.cfg
+    device = next(model.parameters()).device  # model device
+    # build the data pipeline
+    test_pipeline = [LoadImage()] + cfg.data.test.pipeline[1:]
+    test_pipeline = Compose(test_pipeline)
+    data_lst = []
+    for img in imgs:
+        # prepare data
+        data = dict(img=img)
+        data = test_pipeline(data)
+        data_lst.append(data)
+    data = scatter(collate(data_lst, samples_per_gpu=len(data_lst)), [device])[0]
+    with torch.no_grad():
+        result = model(return_loss=False, rescale=True, **data)
+    return result
+
+
 def inference_detector(model, img):
     """Inference image(s) with the detector.
 

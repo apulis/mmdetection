@@ -116,7 +116,6 @@ class BaseDetector(nn.Module, metaclass=ABCMeta):
                     len(imgs), len(img_metas)))
         # TODO: remove the restriction of imgs_per_gpu == 1 when prepared
         imgs_per_gpu = imgs[0].size(0)
-        assert imgs_per_gpu == 1
 
         if num_augs == 1:
             """

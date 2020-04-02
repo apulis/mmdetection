@@ -107,16 +107,31 @@ class BBoxTestMixin(object):
         if self.with_shared_head:
             roi_feats = self.shared_head(roi_feats)
         cls_score, bbox_pred = self.bbox_head(roi_feats)
-        img_shape = img_metas[0]['img_shape']
-        scale_factor = img_metas[0]['scale_factor']
-        det_bboxes, det_labels = self.bbox_head.get_det_bboxes(
-            rois,
-            cls_score,
-            bbox_pred,
-            img_shape,
-            scale_factor,
-            rescale=rescale,
-            cfg=rcnn_test_cfg)
+        img_shapes = tuple(meta['img_shape'] for meta in img_metas)
+        scale_factors = tuple(meta['scale_factor'] for meta in img_metas)
+
+        # split batch bbox prediction back to each image
+        num_pp_per_img = tuple(len(p) for p in proposals)
+        rois = rois.split(num_pp_per_img, 0)
+        cls_score = cls_score.split(num_pp_per_img, 0)
+        # some detector with_reg is False, bbox_pred will be None
+        bbox_pred = bbox_pred.split(
+            num_pp_per_img, 0) if bbox_pred is not None else [None, None]
+
+        # apply bbox post-processing to each image individually
+        det_bboxes = []
+        det_labels = []
+        for i in range(len(proposals)):
+            det_bbox, det_label = self.bbox_head.get_det_bboxes(
+                rois[i],
+                cls_score[i],
+                bbox_pred[i],
+                img_shapes[i],
+                scale_factors[i],
+                rescale=rescale,
+                cfg=rcnn_test_cfg)
+            det_bboxes.append(det_bbox)
+            det_labels.append(det_label)
         return det_bboxes, det_labels
 
     def aug_test_bboxes(self, feats, img_metas, proposal_list, rcnn_test_cfg):
