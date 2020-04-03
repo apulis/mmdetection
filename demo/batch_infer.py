@@ -61,7 +61,7 @@ def sync_main_single(loops, warm_loops=10, io=True):
     for _ in mmcv.track_iter_progress(range(loops)):
         result = inference_detector(model, img)
 
-    #show_result(img, result[0], model.CLASSES, out_file='result_sync_single.jpg')
+    show_result(img, result, model.CLASSES, out_file='result_sync_single.jpg')
 
 
 async def async_main(loops, warm_loops=10):
