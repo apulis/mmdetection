@@ -5,10 +5,10 @@ import numpy as np
 import torch
 import torch.distributed as dist
 from mmcv.parallel import MMDataParallel, MMDistributedDataParallel
-from mmcv.runner import DistSamplerSeedHook, Runner
+from mmcv.runner import (DistSamplerSeedHook, OptimizerHook, Runner,
+                         build_optimizer)
 
-from mmdet.core import (DistEvalHook, DistOptimizerHook, EvalHook,
-                        Fp16OptimizerHook, build_optimizer)
+from mmdet.core import DistEvalHook, EvalHook, Fp16OptimizerHook
 from mmdet.datasets import build_dataloader, build_dataset
 from mmdet.utils import get_root_logger
 
@@ -40,8 +40,7 @@ def parse_losses(losses):
         elif isinstance(loss_value, list):
             log_vars[loss_name] = sum(_loss.mean() for _loss in loss_value)
         else:
-            raise TypeError(
-                '{} is not a tensor or list of tensors'.format(loss_name))
+            raise TypeError(f'{loss_name} is not a tensor or list of tensors')
 
     loss = sum(_value for _key, _value in log_vars.items() if 'loss' in _key)
 
@@ -92,10 +91,24 @@ def train_detector(model,
 
     # prepare data loaders
     dataset = dataset if isinstance(dataset, (list, tuple)) else [dataset]
+    if 'imgs_per_gpu' in cfg.data:
+        logger.warning('"imgs_per_gpu" is deprecated in MMDet V2.0. '
+                       'Please use "samples_per_gpu" instead')
+        if 'samples_per_gpu' in cfg.data:
+            logger.warning(
+                f'Got "imgs_per_gpu"={cfg.data.imgs_per_gpu} and '
+                f'"samples_per_gpu"={cfg.data.samples_per_gpu}, "imgs_per_gpu"'
+                f'={cfg.data.imgs_per_gpu} is used in this experiments')
+        else:
+            logger.warning(
+                'Automatically set "samples_per_gpu"="imgs_per_gpu"='
+                f'{cfg.data.imgs_per_gpu} in this experiments')
+        cfg.data.samples_per_gpu = cfg.data.imgs_per_gpu
+
     data_loaders = [
         build_dataloader(
             ds,
-            cfg.data.imgs_per_gpu,
+            cfg.data.samples_per_gpu,
             cfg.data.workers_per_gpu,
             # cfg.gpus will be ignored if distributed
             len(cfg.gpu_ids),
@@ -126,7 +139,7 @@ def train_detector(model,
         cfg.work_dir,
         logger=logger,
         meta=meta)
-    # an ugly walkaround to make the .log and .log.json filenames the same
+    # an ugly workaround to make .log and .log.json filenames the same
     runner.timestamp = timestamp
 
     # fp16 setting
@@ -134,14 +147,15 @@ def train_detector(model,
     if fp16_cfg is not None:
         optimizer_config = Fp16OptimizerHook(
             **cfg.optimizer_config, **fp16_cfg, distributed=distributed)
-    elif distributed:
-        optimizer_config = DistOptimizerHook(**cfg.optimizer_config)
+    elif distributed and 'type' not in cfg.optimizer_config:
+        optimizer_config = OptimizerHook(**cfg.optimizer_config)
     else:
         optimizer_config = cfg.optimizer_config
 
     # register hooks
     runner.register_training_hooks(cfg.lr_config, optimizer_config,
-                                   cfg.checkpoint_config, cfg.log_config)
+                                   cfg.checkpoint_config, cfg.log_config,
+                                   cfg.get('momentum_config', None))
     if distributed:
         runner.register_hook(DistSamplerSeedHook())
 
@@ -150,7 +164,7 @@ def train_detector(model,
         val_dataset = build_dataset(cfg.data.val, dict(test_mode=True))
         val_dataloader = build_dataloader(
             val_dataset,
-            imgs_per_gpu=1,
+            samples_per_gpu=1,
             workers_per_gpu=cfg.data.workers_per_gpu,
             dist=distributed,
             shuffle=False)
